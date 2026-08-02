@@ -1,0 +1,32 @@
+:root {
+  color: #e3e1e9;
+  background: #0d0e13;
+  font-family: system-ui, Segoe UI, Roboto, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(0, 219, 231, 0.1), transparent 36rem),
+    linear-gradient(180deg, #121318 0%, #0d0e13 100%);
+}
+
+canvas {
+  display: block;
+}

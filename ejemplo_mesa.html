@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>GLOW HOCKEY 4P - Elite Arcade HUD</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;family=Space+Grotesk:wght@600;700&amp;family=Space+Mono:wght@700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-tertiary-fixed-variant": "#095300",
+                    "on-tertiary": "#053900",
+                    "tertiary": "#e4ffd6",
+                    "surface-container-low": "#1a1b21",
+                    "surface-container-high": "#292a2f",
+                    "surface": "#121318",
+                    "inverse-primary": "#00696f",
+                    "on-primary-fixed": "#002022",
+                    "on-error-container": "#ffdad6",
+                    "on-tertiary-fixed": "#022100",
+                    "surface-variant": "#34343a",
+                    "secondary-fixed": "#ffe16d",
+                    "secondary-fixed-dim": "#e9c400",
+                    "outline-variant": "#3a494b",
+                    "tertiary-container": "#34fc0d",
+                    "on-secondary-fixed": "#221b00",
+                    "on-primary": "#00363a",
+                    "error-container": "#93000a",
+                    "primary-container": "#00f2ff",
+                    "secondary": "#fff9ef",
+                    "surface-dim": "#121318",
+                    "on-tertiary-container": "#106f00",
+                    "surface-tint": "#00dbe7",
+                    "on-error": "#690005",
+                    "inverse-on-surface": "#2f3036",
+                    "on-primary-fixed-variant": "#004f54",
+                    "on-background": "#e3e1e9",
+                    "tertiary-fixed": "#79ff5b",
+                    "primary-fixed": "#74f5ff",
+                    "on-surface-variant": "#b9cacb",
+                    "on-secondary-fixed-variant": "#544600",
+                    "on-secondary-container": "#725f00",
+                    "outline": "#849495",
+                    "primary-fixed-dim": "#00dbe7",
+                    "error": "#ffb4ab",
+                    "background": "#121318",
+                    "secondary-container": "#ffdb3c",
+                    "inverse-surface": "#e3e1e9",
+                    "surface-container-highest": "#34343a",
+                    "on-primary-container": "#006a71",
+                    "surface-container": "#1e1f25",
+                    "tertiary-fixed-dim": "#2ae500",
+                    "on-secondary": "#3a3000",
+                    "surface-container-lowest": "#0d0e13",
+                    "surface-bright": "#38393f",
+                    "on-surface": "#e3e1e9",
+                    "primary": "#e1fdff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "margin-safe": "40px",
+                    "panel-padding": "16px",
+                    "unit": "4px",
+                    "grid-size": "32px",
+                    "gutter": "24px"
+            },
+            "fontFamily": {
+                    "stat-value": ["JetBrains Mono"],
+                    "body-md": ["JetBrains Mono"],
+                    "headline-xl": ["Space Grotesk"],
+                    "display-lg": ["Space Grotesk"],
+                    "headline-lg-mobile": ["Space Grotesk"],
+                    "label-caps": ["Space Mono"],
+                    "headline-lg": ["Space Grotesk"]
+            },
+            "fontSize": {
+                    "stat-value": ["20px", {"lineHeight": "20px", "fontWeight": "700"}],
+                    "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-xl": ["48px", {"lineHeight": "56px", "fontWeight": "700"}],
+                    "display-lg": ["72px", {"lineHeight": "80px", "letterSpacing": "-0.04em", "fontWeight": "700"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.1em", "fontWeight": "700"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .neon-glow-blue { filter: drop-shadow(0 0 8px #00dbe7) drop-shadow(0 0 15px #00dbe7); }
+        .neon-glow-red { filter: drop-shadow(0 0 8px #ffb4ab) drop-shadow(0 0 15px #ffb4ab); }
+        .neon-glow-yellow { filter: drop-shadow(0 0 8px #e9c400) drop-shadow(0 0 15px #e9c400); }
+        .neon-glow-green { filter: drop-shadow(0 0 8px #2ae500) drop-shadow(0 0 15px #2ae500); }
+        .neon-glow-white { filter: drop-shadow(0 0 12px #ffffff) drop-shadow(0 0 25px #ffffff); }
+
+        .arena-grid {
+            background-image: 
+                linear-gradient(to right, rgba(0, 219, 231, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 219, 231, 0.05) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.05); opacity: 0.4; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .pulse-effect { animation: pulse-ring 3s infinite ease-in-out; }
+
+        .glass-panel {
+            background: rgba(26, 27, 33, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(132, 148, 149, 0.2);
+        }
+
+        .puck-motion {
+            animation: float 2s infinite ease-in-out;
+        }
+        @keyframes float {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-45%, -55%) scale(1.1); }
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md overflow-hidden h-screen select-none">
+<!-- Top App Bar -->
+<header class="fixed top-0 left-0 w-full flex justify-between items-center px-gutter py-4 z-50 bg-gradient-to-b from-surface-container-low/80 to-transparent">
+<div class="flex items-center gap-6">
+<h1 class="font-display-lg text-headline-lg text-primary drop-shadow-[0_0_10px_rgba(0,219,231,0.8)]">GLOW HOCKEY 4P</h1>
+<nav class="hidden md:flex gap-8">
+<a class="text-primary font-bold border-b-2 border-primary duration-300" href="#">Lobby</a>
+<a class="text-on-surface-variant hover:text-primary-fixed duration-300" href="#">Spectate</a>
+<a class="text-on-surface-variant hover:text-primary-fixed duration-300" href="#">Rankings</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-on-surface-variant hover:text-primary-fixed duration-300">fullscreen</button>
+<button class="material-symbols-outlined text-on-surface-variant hover:text-primary-fixed duration-300">settings</button>
+</div>
+</header>
+<!-- Side HUD -->
+<aside class="fixed left-0 top-0 h-full w-64 flex flex-col z-40 bg-surface-container-low/40 backdrop-blur-xl border-r border-outline-variant/30 shadow-[5px_0_15px_rgba(0,0,0,0.5)] pt-24 pb-8">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3 mb-4">
+<div class="w-10 h-10 rounded-full border-2 border-primary bg-primary-container/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary">person</span>
+</div>
+<div>
+<h3 class="font-headline-lg text-body-md text-primary">System HUD</h3>
+<p class="text-[10px] font-label-caps text-on-surface-variant">V-SYNC: ON | LATENCY: 12ms</p>
+</div>
+</div>
+<div class="space-y-1">
+<div class="bg-primary-container/20 text-primary border-l-4 border-primary px-4 py-3 flex items-center gap-3 active:translate-x-1 duration-150">
+<span class="material-symbols-outlined text-[20px]">sports_esports</span>
+<span class="font-body-md">Lobby</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-surface-variant/50 hover:text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[20px]">visibility</span>
+<span class="font-body-md">Spectate</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-surface-variant/50 hover:text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[20px]">leaderboard</span>
+<span class="font-body-md">Rankings</span>
+</div>
+<div class="text-on-surface-variant px-4 py-3 flex items-center gap-3 hover:bg-surface-variant/50 hover:text-on-surface transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[20px]">history</span>
+<span class="font-body-md">Replays</span>
+</div>
+</div>
+</div>
+<div class="mt-auto px-6 space-y-4">
+<button class="w-full bg-primary-container text-on-primary-container font-label-caps py-3 rounded shadow-lg shadow-primary/20 active:scale-95 transition-all">JOIN MATCH</button>
+<div class="space-y-1">
+<div class="text-on-surface-variant text-[12px] flex items-center gap-3 px-4 py-2 cursor-pointer hover:text-primary">
+<span class="material-symbols-outlined text-[18px]">help</span>
+<span>Support</span>
+</div>
+<div class="text-on-surface-variant text-[12px] flex items-center gap-3 px-4 py-2 cursor-pointer hover:text-primary">
+<span class="material-symbols-outlined text-[18px]">settings</span>
+<span>Settings</span>
+</div>
+</div>
+</div>
+</aside>
+<!-- Main Game Canvas -->
+<main class="ml-64 h-full relative flex items-center justify-center p-gutter">
+<!-- Background Grid Animation -->
+
+<div class="relative w-full max-w-5xl aspect-[4/3] glass-panel rounded-[40px] p-1 shadow-2xl overflow-hidden">
+<!-- Table Surface -->
+<div class="absolute inset-0 arena-grid opacity-20"></div>
+<!-- Table Borders -->
+<div class="absolute inset-0 border-[6px] border-outline-variant/30 rounded-[40px]"></div>
+<!-- Player Zones -->
+<!-- TOP (Yellow) -->
+<div class="absolute top-0 left-1/4 right-1/4 h-1/4 border-b-2 border-dashed border-secondary-fixed/30 bg-secondary-fixed/5 rounded-b-2xl"></div>
+<!-- LEFT (Blue) -->
+<div class="absolute top-1/4 bottom-1/4 left-0 w-1/4 border-r-2 border-dashed border-primary-fixed/30 bg-primary-fixed/5 rounded-r-2xl"></div>
+<!-- RIGHT (Green) -->
+<div class="absolute top-1/4 bottom-1/4 right-0 w-1/4 border-l-2 border-dashed border-tertiary-fixed/30 bg-tertiary-fixed/5 rounded-l-2xl"></div>
+<!-- BOTTOM (Red) -->
+<div class="absolute bottom-0 left-1/4 right-1/4 h-1/4 border-t-2 border-dashed border-error/30 bg-error/5 rounded-t-2xl"></div>
+<!-- Central Puck -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30">
+<div class="w-10 h-10 rounded-full bg-white neon-glow-white puck-motion relative">
+<div class="absolute inset-0 rounded-full border-2 border-white/50 animate-ping opacity-50"></div>
+</div>
+<div class="absolute -inset-12 bg-white/5 blur-3xl rounded-full"></div>
+</div>
+<!-- Strikers (Mallets) -->
+<!-- P1 (Blue - Left) -->
+<div class="absolute left-8 top-1/2 -translate-y-1/2 w-14 h-14 bg-primary-fixed rounded-full neon-glow-blue border-2 border-white/40 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full border-2 border-white/60"></div>
+</div>
+<!-- P2 (Yellow - Top) -->
+<div class="absolute top-8 left-1/2 -translate-x-1/2 w-14 h-14 bg-secondary-fixed rounded-full neon-glow-yellow border-2 border-white/40 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full border-2 border-white/60"></div>
+</div>
+<!-- P3 (Green - Right) -->
+<div class="absolute right-8 top-1/2 -translate-y-1/2 w-14 h-14 bg-tertiary-fixed rounded-full neon-glow-green border-2 border-white/40 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full border-2 border-white/60"></div>
+</div>
+<!-- P4 (Red - Bottom) -->
+<div class="absolute bottom-8 left-1/2 -translate-x-1/2 w-14 h-14 bg-error rounded-full neon-glow-red border-2 border-white/40 flex items-center justify-center">
+<div class="w-6 h-6 rounded-full border-2 border-white/60"></div>
+</div>
+<!-- Scoreboards -->
+<!-- P1 HUD (Blue) -->
+<div class="absolute bottom-8 left-8 p-4 glass-panel rounded-xl min-w-[120px] border-l-4 border-primary-fixed">
+<p class="font-label-caps text-[10px] text-primary-fixed mb-1 uppercase">P1_NEO_WAVE</p>
+<div class="flex items-end justify-between">
+<span class="font-stat-value text-headline-lg text-primary-fixed">08</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant mb-1">LVL 42</span>
+</div>
+</div>
+<!-- P2 HUD (Yellow) -->
+<div class="absolute top-8 left-8 p-4 glass-panel rounded-xl min-w-[120px] border-t-4 border-secondary-fixed">
+<p class="font-label-caps text-[10px] text-secondary-fixed mb-1 uppercase">P2_GOLD_STRIKE</p>
+<div class="flex items-end justify-between">
+<span class="font-stat-value text-headline-lg text-secondary-fixed">12</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant mb-1">LVL 31</span>
+</div>
+</div>
+<!-- P3 HUD (Green) -->
+<div class="absolute top-8 right-8 p-4 glass-panel rounded-xl min-w-[120px] border-r-4 border-tertiary-fixed text-right">
+<p class="font-label-caps text-[10px] text-tertiary-fixed mb-1 uppercase">P3_GREEN_LIT</p>
+<div class="flex items-end justify-between flex-row-reverse">
+<span class="font-stat-value text-headline-lg text-tertiary-fixed">05</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant mb-1">LVL 18</span>
+</div>
+</div>
+<!-- P4 HUD (Red) -->
+<div class="absolute bottom-8 right-8 p-4 glass-panel rounded-xl min-w-[120px] border-b-4 border-error text-right">
+<p class="font-label-caps text-[10px] text-error mb-1 uppercase">P4_RED_ZONE</p>
+<div class="flex items-end justify-between flex-row-reverse">
+<span class="font-stat-value text-headline-lg text-error">09</span>
+<span class="font-label-caps text-[10px] text-on-surface-variant mb-1">LVL 55</span>
+</div>
+</div>
+<!-- Match Status Overlay -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-[180%] text-center z-50">
+<p class="font-label-caps text-primary-fixed tracking-[0.4em] mb-2 drop-shadow-lg">MATCH IN PROGRESS</p>
+<div class="flex items-center gap-4 px-6 py-2 bg-surface-container-high/60 backdrop-blur-md rounded-full border border-outline-variant/40">
+<span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+<span class="font-stat-value text-on-surface">04:22</span>
+<span class="w-1 h-4 bg-outline-variant/50 rounded"></span>
+<span class="font-stat-value text-primary-fixed">60 FPS</span>
+</div>
+</div>
+</div>
+<!-- Floating UI Decoration / Power-ups -->
+<div class="absolute right-gutter top-1/2 -translate-y-1/2 space-y-4">
+<div class="w-14 h-14 rounded-xl glass-panel flex flex-col items-center justify-center group cursor-pointer hover:border-primary-fixed transition-colors">
+<span class="material-symbols-outlined text-primary-fixed group-hover:scale-110 transition-transform">bolt</span>
+<span class="text-[8px] font-label-caps text-on-surface-variant mt-1">SPEED</span>
+</div>
+<div class="w-14 h-14 rounded-xl glass-panel flex flex-col items-center justify-center group cursor-pointer hover:border-secondary-fixed transition-colors">
+<span class="material-symbols-outlined text-secondary-fixed group-hover:scale-110 transition-transform">shield</span>
+<span class="text-[8px] font-label-caps text-on-surface-variant mt-1">WALL</span>
+</div>
+<div class="w-14 h-14 rounded-xl glass-panel flex flex-col items-center justify-center group cursor-pointer hover:border-tertiary-fixed transition-colors">
+<span class="material-symbols-outlined text-tertiary-fixed group-hover:scale-110 transition-transform">all_inclusive</span>
+<span class="text-[8px] font-label-caps text-on-surface-variant mt-1">GHOST</span>
+</div>
+</div>
+</main>
+<!-- Footer Status Bar -->
+<footer class="fixed bottom-0 left-64 right-0 h-10 px-gutter flex items-center justify-between bg-surface-container-low/60 backdrop-blur-md border-t border-outline-variant/20">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-tertiary-fixed"></span>
+<span class="text-[10px] font-label-caps text-on-surface-variant">SERVERS: OPTIMAL</span>
+</div>
+<div class="text-[10px] font-label-caps text-on-surface-variant">42,901 PLAYERS ONLINE</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="text-[10px] font-label-caps text-on-surface-variant">REGION: US-EAST</span>
+<span class="text-[10px] font-label-caps text-primary-fixed">BUILD 4.0.12-PRO</span>
+</div>
+</footer>
+<!-- Interactive Script for subtle mouse tracking glow -->
+<script>
+        const body = document.body;
+        body.addEventListener('mousemove', (e) => {
+            const x = e.clientX;
+            const y = e.clientY;
+            // Future interaction: Could track mouse for striker movement if not automated
+        });
+
+        // Simple score pulse animation simulator
+        setInterval(() => {
+            const scores = document.querySelectorAll('.font-stat-value');
+            const randomScore = scores[Math.floor(Math.random() * scores.length)];
+            randomScore.classList.add('scale-110', 'brightness-150');
+            setTimeout(() => {
+                randomScore.classList.remove('scale-110', 'brightness-150');
+            }, 200);
+        }, 5000);
+    </script>
+</body></html>
