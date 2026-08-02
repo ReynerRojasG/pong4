@@ -202,6 +202,8 @@ export class BoardScene extends Phaser.Scene {
 
     this.gameActive = false;
 
+    this.ballController?.cancelPendingReset();
+
     this.ballController?.stop();
 
     this.menuUI =
@@ -570,30 +572,8 @@ export class BoardScene extends Phaser.Scene {
       return;
     }
 
-    let scoringPlayer = null;
-
-    /*
-      Si la bola entra por una portería,
-      marca el jugador del lado contrario.
-    */
-
-    switch (goalName) {
-      case 'superior':
-        scoringPlayer = 'PC4';
-        break;
-
-      case 'derecha':
-        scoringPlayer = 'PC1';
-        break;
-
-      case 'inferior':
-        scoringPlayer = 'PC2';
-        break;
-
-      case 'izquierda':
-        scoringPlayer = 'PC3';
-        break;
-    }
+    const scoringPlayer =
+      this.getScoringPlayer(goalName);
 
     if (!scoringPlayer) {
       return;
@@ -613,6 +593,18 @@ export class BoardScene extends Phaser.Scene {
     this.showGoalMessage(
       scoringPlayer
     );
+  }
+
+  getScoringPlayer(goalName) {
+    // Regla local actual: anota el jugador opuesto al lado del gol.
+    const scoringPlayerByGoal = {
+      superior: 'PC4',
+      derecha: 'PC1',
+      inferior: 'PC2',
+      izquierda: 'PC3',
+    };
+
+    return scoringPlayerByGoal[goalName] ?? null;
   }
 
   // =====================================================
@@ -869,6 +861,8 @@ export class BoardScene extends Phaser.Scene {
 
     this.gameActive = true;
 
+    this.ballController.cancelPendingReset();
+
     this.ballController.resetToCenter();
 
     this.ballController.launch();
@@ -890,6 +884,8 @@ export class BoardScene extends Phaser.Scene {
     );
 
     this.gameActive = false;
+
+    this.ballController.cancelPendingReset();
 
     this.ballController.stop();
 
@@ -991,7 +987,18 @@ export class BoardScene extends Phaser.Scene {
         b.score - a.score
     );
 
-    const mvp = players[0];
+    const maxScore = players[0].score;
+
+    const leaders = players.filter(
+      (player) =>
+        player.score === maxScore
+    );
+
+    const isTie = leaders.length > 1;
+
+    const resultNames = leaders
+      .map((player) => player.name)
+      .join(' Y ');
 
     // =====================================================
     // MVP
@@ -1001,7 +1008,7 @@ export class BoardScene extends Phaser.Scene {
       this.add.text(
         width / 2,
         165,
-        '★ MVP ★',
+        isTie ? 'EMPATE' : '★ MVP ★',
         {
           fontFamily:
             'Space Grotesk, Arial, sans-serif',
@@ -1010,7 +1017,9 @@ export class BoardScene extends Phaser.Scene {
 
           fontStyle: 'bold',
 
-          color: '#e9c400',
+          color: isTie
+            ? '#e1fdff'
+            : '#e9c400',
         }
       );
 
@@ -1020,7 +1029,7 @@ export class BoardScene extends Phaser.Scene {
       this.add.text(
         width / 2,
         210,
-        mvp.name,
+        resultNames,
         {
           fontFamily:
             'Space Grotesk, Arial, sans-serif',
@@ -1029,7 +1038,9 @@ export class BoardScene extends Phaser.Scene {
 
           fontStyle: 'bold',
 
-          color: mvp.color,
+          color: isTie
+            ? '#e1fdff'
+            : leaders[0].color,
 
           stroke: '#ffffff',
 
@@ -1043,7 +1054,7 @@ export class BoardScene extends Phaser.Scene {
       this.add.text(
         width / 2,
         265,
-        `${mvp.score} GOLES`,
+        `${maxScore} GOLES`,
         {
           fontFamily:
             'Space Grotesk, Arial, sans-serif',

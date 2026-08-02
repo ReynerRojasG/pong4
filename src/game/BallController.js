@@ -2,13 +2,16 @@ import Phaser from 'phaser';
 
 const BALL_RADIUS = 14;
 const WALL_THICKNESS = 18;
-const MIN_SPEED = 270;
-const MAX_SPEED = 360;
+const MIN_SPEED = 340;
+const MAX_SPEED = 450;
+const GOAL_RESET_DELAY = 700;
 
 export class BallController {
   constructor(scene, board) {
     this.scene = scene;
     this.board = board;
+    this.isResetting = false;
+    this.resetTimer = null;
 
     // Paredes físicas
     this.walls = scene.physics.add.staticGroup();
@@ -200,6 +203,15 @@ export class BallController {
     this.assignRandomVelocity();
   }
 
+  cancelPendingReset() {
+    if (this.resetTimer) {
+      this.resetTimer.remove(false);
+      this.resetTimer = null;
+    }
+
+    this.isResetting = false;
+  }
+
   stop() {
     if (!this.ball?.body) {
       return;
@@ -236,13 +248,21 @@ export class BallController {
   }
 
   update() {
+    if (!this.scene.gameActive || this.isResetting) {
+      return;
+    }
+
     this.ensureMoving();
 
     this.checkGoal();
   }
 
   ensureMoving() {
-    if (!this.ball?.body) {
+    if (
+      !this.ball?.body ||
+      !this.scene.gameActive ||
+      this.isResetting
+    ) {
       return;
     }
 
@@ -271,6 +291,10 @@ export class BallController {
   }
 
   checkGoal() {
+    if (this.isResetting) {
+      return;
+    }
+
     const play =
       this.board.getWorldPlayBounds();
 
@@ -355,46 +379,31 @@ export class BallController {
     );
   }
 
-scoreGoal(goalName) {
-  console.log(`Gol en porteria ${goalName}`);
-
-  // Avisamos a BoardScene qué portería recibió el gol.
-  this.scene.onGoal?.(goalName);
-
-  // Detenemos la bola.
-  this.stop();
-
-  // La devolvemos al centro.
-  this.resetToCenter();
-
-  // Esperamos un momento antes de volver a lanzarla.
-  this.scene.time.delayedCall(700, () => {
-    if (this.scene.gameActive) {
-      this.launch();
+  scoreGoal(goalName) {
+    if (this.isResetting || !this.scene.gameActive) {
+      return;
     }
-  });
 
-    // Avisar a BoardScene
-    // para que posteriormente
-    // podamos sumar puntos.
-    this.scene.onGoal?.(goalName);
+    this.isResetting = true;
 
-    // Detener bola
+    console.log(`Gol en porteria ${goalName}`);
+
     this.stop();
-
-    // Volver al centro
+    this.scene.onGoal?.(goalName);
     this.resetToCenter();
 
-    // Lanzar otra vez después
-    // de un pequeño momento.
-    this.scene.time.delayedCall(
-      400,
+    this.resetTimer = this.scene.time.delayedCall(
+      GOAL_RESET_DELAY,
       () => {
-        if (
-          this.scene.gameActive
-        ) {
-          this.launch();
+        this.resetTimer = null;
+
+        if (!this.scene.gameActive) {
+          this.isResetting = false;
+          return;
         }
+
+        this.launch();
+        this.isResetting = false;
       }
     );
   }
