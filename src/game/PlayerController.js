@@ -16,6 +16,11 @@ export class PlayerController {
     this.disk = scene.add.circle(0, 0, PLAYER_RADIUS, this.color, 0.9);
     this.core = scene.add.circle(0, 0, PLAYER_RADIUS * 0.42, 0xffffff, 0.18);
 
+    if (this.isControlled) {
+      this.disk.setStrokeStyle(4, 0xffffff, 0.9);
+      this.glow.setAlpha(0.34);
+    }
+
     this.glow.setDepth(10);
     this.disk.setDepth(11);
     this.core.setDepth(12);

@@ -6,7 +6,11 @@ import {
 
 const DEFAULT_TIMEOUT = 5000;
 const DEFAULT_SERVER_URL = import.meta.env?.VITE_SERVER_URL
-  ?? 'http://127.0.0.1:3000';
+  ?? (import.meta.env?.DEV
+    ? 'http://127.0.0.1:3000'
+    : typeof window === 'undefined'
+      ? 'http://127.0.0.1:3000'
+      : window.location.origin);
 
 export class MultiplayerError extends Error {
   constructor(code, message) {
@@ -82,8 +86,29 @@ export class MultiplayerClient {
     return this.emitWithAcknowledgement(CLIENT_EVENTS.SET_READY, { ready });
   }
 
+  sendPaddleInput(position) {
+    if (!this.socket.connected) {
+      return false;
+    }
+
+    this.socket.emit(CLIENT_EVENTS.PADDLE_INPUT, position);
+    return true;
+  }
+
   onConnectionReady(listener) {
     return this.subscribe(SERVER_EVENTS.CONNECTION_READY, listener);
+  }
+
+  onConnect(listener) {
+    return this.subscribe('connect', listener);
+  }
+
+  onDisconnect(listener) {
+    return this.subscribe('disconnect', listener);
+  }
+
+  onConnectError(listener) {
+    return this.subscribe('connect_error', listener);
   }
 
   onRoomState(listener) {
@@ -92,6 +117,18 @@ export class MultiplayerClient {
 
   onMatchReady(listener) {
     return this.subscribe(SERVER_EVENTS.MATCH_READY, listener);
+  }
+
+  onMatchState(listener) {
+    return this.subscribe(SERVER_EVENTS.MATCH_STATE, listener);
+  }
+
+  onMatchEnded(listener) {
+    return this.subscribe(SERVER_EVENTS.MATCH_ENDED, listener);
+  }
+
+  onMatchError(listener) {
+    return this.subscribe(SERVER_EVENTS.MATCH_ERROR, listener);
   }
 
   subscribe(eventName, listener) {

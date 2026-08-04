@@ -4,8 +4,10 @@ import { BallController } from '../game/BallController.js';
 import { PlayerController } from '../game/PlayerController.js';
 
 export class BoardScene extends Phaser.Scene {
-  constructor() {
+  constructor({ localPlayerSide = 'left' } = {}) {
     super('BoardScene');
+
+    this.localPlayerSide = localPlayerSide;
 
     // =====================================================
     // ESTADO DE LA PARTIDA
@@ -71,7 +73,7 @@ export class BoardScene extends Phaser.Scene {
         {
           side: 'left',
           color: 0x00dbe7,
-          isControlled: true,
+          isControlled: this.localPlayerSide === 'left',
         }
       ),
 
@@ -82,6 +84,7 @@ export class BoardScene extends Phaser.Scene {
         {
           side: 'top',
           color: 0xe9c400,
+          isControlled: this.localPlayerSide === 'top',
         }
       ),
 
@@ -92,6 +95,7 @@ export class BoardScene extends Phaser.Scene {
         {
           side: 'right',
           color: 0x2ae500,
+          isControlled: this.localPlayerSide === 'right',
         }
       ),
 
@@ -102,6 +106,7 @@ export class BoardScene extends Phaser.Scene {
         {
           side: 'bottom',
           color: 0xff8a80,
+          isControlled: this.localPlayerSide === 'bottom',
         }
       ),
     ];

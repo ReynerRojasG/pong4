@@ -2,6 +2,7 @@ import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
 } from '../shared/protocol.js';
+import { MatchError } from './AuthoritativeMatch.js';
 import { RoomError } from './RoomRegistry.js';
 
 function sendAcknowledgement(acknowledge, payload) {
@@ -11,7 +12,7 @@ function sendAcknowledgement(acknowledge, payload) {
 }
 
 function toErrorPayload(error, logger) {
-  if (error instanceof RoomError) {
+  if (error instanceof RoomError || error instanceof MatchError) {
     return {
       ok: false,
       error: {
@@ -32,7 +33,12 @@ function toErrorPayload(error, logger) {
   };
 }
 
-export function registerSocketHandlers({ io, roomRegistry, logger = console }) {
+export function registerSocketHandlers({
+  io,
+  matchManager,
+  roomRegistry,
+  logger = console,
+}) {
   io.on('connection', (socket) => {
     socket.emit(SERVER_EVENTS.CONNECTION_READY, { playerId: socket.id });
 
@@ -107,8 +113,10 @@ export function registerSocketHandlers({ io, roomRegistry, logger = console }) {
         io.to(result.room.code).emit(SERVER_EVENTS.ROOM_STATE, result.room);
 
         if (result.becameReady) {
+          const state = matchManager.startMatch(result.room);
           io.to(result.room.code).emit(SERVER_EVENTS.MATCH_READY, {
             room: result.room,
+            state,
           });
         }
 
@@ -121,8 +129,31 @@ export function registerSocketHandlers({ io, roomRegistry, logger = console }) {
       }
     });
 
+    socket.on(CLIENT_EVENTS.PADDLE_INPUT, (payload) => {
+      const receivedAt = Date.now();
+
+      if (receivedAt - (socket.data.lastPaddleInputAt ?? 0) < 8) {
+        return;
+      }
+
+      socket.data.lastPaddleInputAt = receivedAt;
+
+      try {
+        matchManager.setPaddleTarget(socket.id, payload);
+      } catch (error) {
+        const errorPayload = toErrorPayload(error, logger);
+        socket.emit(SERVER_EVENTS.MATCH_ERROR, errorPayload.error);
+      }
+    });
+
     socket.on(CLIENT_EVENTS.LEAVE_ROOM, async (_payload, acknowledge) => {
       try {
+        const activeRoomCode = socket.data.roomCode;
+
+        if (activeRoomCode) {
+          matchManager.endMatch(activeRoomCode, 'player-left');
+        }
+
         const result = roomRegistry.leaveRoom(socket.id);
 
         if (result) {
@@ -141,6 +172,12 @@ export function registerSocketHandlers({ io, roomRegistry, logger = console }) {
     });
 
     socket.on('disconnect', () => {
+      const activeRoomCode = socket.data.roomCode;
+
+      if (activeRoomCode) {
+        matchManager.endMatch(activeRoomCode, 'player-disconnected');
+      }
+
       const result = roomRegistry.leaveRoom(socket.id);
 
       if (result?.room) {

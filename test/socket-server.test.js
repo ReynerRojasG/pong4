@@ -93,6 +93,7 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
     assert.deepEqual(await initialHealthResponse.json(), {
       status: 'ok',
       rooms: 0,
+      matches: 0,
     });
 
     for (let index = 0; index < 5; index += 1) {
@@ -111,6 +112,7 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
     assert.deepEqual(await activeHealthResponse.json(), {
       status: 'ok',
       rooms: 1,
+      matches: 0,
     });
 
     for (let index = 1; index < 4; index += 1) {
@@ -145,16 +147,59 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
     const matchPayload = await matchReadyEvent;
     assert.equal(matchPayload.room.phase, ROOM_PHASES.READY);
     assert.equal(matchPayload.room.players.length, 4);
+    assert.equal(matchPayload.state.phase, 'countdown');
+    assert.equal(applicationServer.matchManager.size, 1);
+
+    const synchronizedStatePromises = clients.slice(0, 4).map((client) => (
+      waitForEvent(
+        client,
+        SERVER_EVENTS.MATCH_STATE,
+        (state) => state.sequence > matchPayload.state.sequence,
+      )
+    ));
+    const synchronizedStates = await Promise.all(synchronizedStatePromises);
+    const referenceState = synchronizedStates[0];
+
+    for (const state of synchronizedStates.slice(1)) {
+      assert.equal(state.sequence, referenceState.sequence);
+      assert.deepEqual(state.ball, referenceState.ball);
+      assert.deepEqual(state.players, referenceState.players);
+      assert.equal(state.timeRemaining, referenceState.timeRemaining);
+    }
+
+    const controlledPlayerId = clients[1].id;
+    const movedPaddleState = waitForEvent(
+      clients[0],
+      SERVER_EVENTS.MATCH_STATE,
+      (state) => state.players.some(
+        (player) => player.id === controlledPlayerId && player.y < 75,
+      ),
+    );
+    clients[1].emit(CLIENT_EVENTS.PADDLE_INPUT, { x: 500, y: 30 });
+
+    const inputPayload = await movedPaddleState;
+    const controlledPlayer = inputPayload.players.find(
+      (player) => player.id === controlledPlayerId,
+    );
+    assert.equal(controlledPlayer.side, 'top');
+    assert.ok(controlledPlayer.y >= 30);
 
     const roomAfterDisconnect = waitForEvent(
       clients[0],
       SERVER_EVENTS.ROOM_STATE,
       (room) => room.players.length === 3,
     );
+    const matchAfterDisconnect = waitForEvent(
+      clients[0],
+      SERVER_EVENTS.MATCH_ENDED,
+    );
     clients[3].disconnect();
 
     const disconnectPayload = await roomAfterDisconnect;
+    const matchEndedPayload = await matchAfterDisconnect;
     assert.equal(disconnectPayload.phase, ROOM_PHASES.LOBBY);
+    assert.equal(matchEndedPayload.reason, 'player-disconnected');
+    assert.equal(applicationServer.matchManager.size, 0);
 
     for (const client of clients) {
       client.disconnect();
