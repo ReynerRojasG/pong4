@@ -5,6 +5,7 @@ import {
 } from '../../shared/protocol.js';
 
 const DEFAULT_TIMEOUT = 5000;
+const SESSION_STORAGE_KEY = 'pong4.multiplayer-session';
 const DEFAULT_SERVER_URL = import.meta.env?.VITE_SERVER_URL
   ?? (import.meta.env?.DEV
     ? 'http://127.0.0.1:3000'
@@ -27,9 +28,30 @@ export class MultiplayerClient {
     socketOptions = {},
   } = {}) {
     this.timeout = timeout;
+    this.session = this.loadSession();
+    this.currentPlayerId = this.session?.playerId ?? null;
+    const sessionAuth = this.session?.sessionToken
+      ? { sessionToken: this.session.sessionToken }
+      : {};
     this.socket = io(serverUrl, {
       autoConnect: false,
       ...socketOptions,
+      auth: {
+        ...socketOptions.auth,
+        ...sessionAuth,
+      },
+    });
+    this.socket.on(SERVER_EVENTS.CONNECTION_READY, (payload) => {
+      if (payload?.resumed) {
+        this.currentPlayerId = payload.playerId;
+        return;
+      }
+
+      if (this.session) {
+        this.clearSession();
+      }
+
+      this.currentPlayerId = payload?.playerId ?? this.socket.id ?? null;
     });
   }
 
@@ -38,7 +60,7 @@ export class MultiplayerClient {
   }
 
   get playerId() {
-    return this.socket.id ?? null;
+    return this.currentPlayerId ?? this.socket.id ?? null;
   }
 
   connect() {
@@ -70,16 +92,28 @@ export class MultiplayerClient {
     this.socket.disconnect();
   }
 
-  createRoom(name) {
-    return this.emitWithAcknowledgement(CLIENT_EVENTS.CREATE_ROOM, { name });
+  async createRoom(name) {
+    const response = await this.emitWithAcknowledgement(
+      CLIENT_EVENTS.CREATE_ROOM,
+      { name },
+    );
+    this.rememberSession(response);
+    return response;
   }
 
-  joinRoom(code, name) {
-    return this.emitWithAcknowledgement(CLIENT_EVENTS.JOIN_ROOM, { code, name });
+  async joinRoom(code, name) {
+    const response = await this.emitWithAcknowledgement(
+      CLIENT_EVENTS.JOIN_ROOM,
+      { code, name },
+    );
+    this.rememberSession(response);
+    return response;
   }
 
-  leaveRoom() {
-    return this.emitWithAcknowledgement(CLIENT_EVENTS.LEAVE_ROOM, {});
+  async leaveRoom() {
+    const response = await this.emitWithAcknowledgement(CLIENT_EVENTS.LEAVE_ROOM, {});
+    this.clearSession();
+    return response;
   }
 
   setReady(ready) {
@@ -134,6 +168,62 @@ export class MultiplayerClient {
   subscribe(eventName, listener) {
     this.socket.on(eventName, listener);
     return () => this.socket.off(eventName, listener);
+  }
+
+  rememberSession(response) {
+    if (!response?.playerId || !response?.sessionToken) {
+      return;
+    }
+
+    this.session = {
+      playerId: response.playerId,
+      sessionToken: response.sessionToken,
+    };
+    this.currentPlayerId = response.playerId;
+    this.socket.auth = { sessionToken: response.sessionToken };
+
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(this.session));
+      } catch {
+        // The in-memory session still supports transport reconnection.
+      }
+    }
+  }
+
+  clearSession() {
+    this.session = null;
+    this.currentPlayerId = null;
+    this.socket.auth = {};
+
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        sessionStorage.removeItem(SESSION_STORAGE_KEY);
+      } catch {
+        // The in-memory session is already cleared.
+      }
+    }
+  }
+
+  loadSession() {
+    if (typeof sessionStorage === 'undefined') {
+      return null;
+    }
+
+    try {
+      const value = JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEY));
+
+      if (
+        typeof value?.playerId === 'string'
+        && typeof value?.sessionToken === 'string'
+      ) {
+        return value;
+      }
+    } catch {
+      sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    }
+
+    return null;
   }
 
   emitWithAcknowledgement(eventName, payload) {

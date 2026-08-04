@@ -9,6 +9,14 @@ const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const MAX_NAME_LENGTH = 24;
 
+function generatePlayerId() {
+  return `player-${randomBytes(16).toString('hex')}`;
+}
+
+function generateSessionToken() {
+  return randomBytes(32).toString('hex');
+}
+
 export class RoomError extends Error {
   constructor(code, message) {
     super(message);
@@ -26,11 +34,19 @@ export function generateRoomCode() {
 }
 
 export class RoomRegistry {
-  constructor({ codeGenerator = generateRoomCode, now = Date.now } = {}) {
+  constructor({
+    codeGenerator = generateRoomCode,
+    playerIdGenerator = generatePlayerId,
+    sessionTokenGenerator = generateSessionToken,
+    now = Date.now,
+  } = {}) {
     this.codeGenerator = codeGenerator;
+    this.playerIdGenerator = playerIdGenerator;
+    this.sessionTokenGenerator = sessionTokenGenerator;
     this.now = now;
     this.rooms = new Map();
     this.socketRooms = new Map();
+    this.sessions = new Map();
   }
 
   get size() {
@@ -53,10 +69,12 @@ export class RoomRegistry {
 
     this.rooms.set(code, room);
     this.socketRooms.set(socketId, code);
+    this.registerPlayerSession(room, player);
 
     return {
       room: this.toSnapshot(room),
-      player: { ...player },
+      player: this.toPlayerSnapshot(player),
+      sessionToken: player.sessionToken,
     };
   }
 
@@ -83,10 +101,12 @@ export class RoomRegistry {
     room.phase = ROOM_PHASES.LOBBY;
     room.version += 1;
     this.socketRooms.set(socketId, roomCode);
+    this.registerPlayerSession(room, player);
 
     return {
       room: this.toSnapshot(room),
-      player: { ...player },
+      player: this.toPlayerSnapshot(player),
+      sessionToken: player.sessionToken,
     };
   }
 
@@ -96,7 +116,7 @@ export class RoomRegistry {
     }
 
     const room = this.getMutableRoomForSocket(socketId);
-    const player = room.players.find((candidate) => candidate.id === socketId);
+    const player = room.players.find((candidate) => candidate.socketId === socketId);
 
     if (!player) {
       throw new RoomError('PLAYER_NOT_FOUND', 'Player not found in room.');
@@ -132,31 +152,101 @@ export class RoomRegistry {
       return null;
     }
 
-    const playerIndex = room.players.findIndex((player) => player.id === socketId);
-    const [player] = playerIndex >= 0
-      ? room.players.splice(playerIndex, 1)
-      : [null];
+    const player = room.players.find((candidate) => candidate.socketId === socketId);
+    return this.removePlayer(room, player);
+  }
 
-    if (room.players.length === 0) {
-      this.rooms.delete(code);
+  disconnectSocket(socketId) {
+    const code = this.socketRooms.get(socketId);
 
-      return { room: null, roomCode: code, player };
+    if (!code) {
+      return null;
     }
 
+    const room = this.rooms.get(code);
+    this.socketRooms.delete(socketId);
+
+    if (!room) {
+      return null;
+    }
+
+    const player = room.players.find((candidate) => candidate.socketId === socketId);
+
+    if (!player) {
+      return null;
+    }
+
+    player.socketId = null;
+    player.connected = false;
     room.phase = this.calculatePhase(room);
     room.version += 1;
 
     return {
       room: this.toSnapshot(room),
       roomCode: code,
-      player,
+      player: this.toPlayerSnapshot(player),
     };
+  }
+
+  reconnectPlayer({ socketId, sessionToken }) {
+    this.assertSocketAvailable(socketId);
+
+    if (typeof sessionToken !== 'string' || sessionToken.length === 0) {
+      return null;
+    }
+
+    const session = this.sessions.get(sessionToken);
+    const room = session ? this.rooms.get(session.roomCode) : null;
+    const player = room?.players.find((candidate) => candidate.id === session.playerId);
+
+    if (!room || !player) {
+      this.sessions.delete(sessionToken);
+      return null;
+    }
+
+    if (player.connected && player.socketId !== socketId) {
+      return null;
+    }
+
+    if (player.socketId) {
+      this.socketRooms.delete(player.socketId);
+    }
+
+    player.socketId = socketId;
+    player.connected = true;
+    room.phase = this.calculatePhase(room);
+    room.version += 1;
+    this.socketRooms.set(socketId, room.code);
+
+    return {
+      room: this.toSnapshot(room),
+      player: this.toPlayerSnapshot(player),
+    };
+  }
+
+  removeDisconnectedPlayer(playerId) {
+    for (const room of this.rooms.values()) {
+      const player = room.players.find((candidate) => candidate.id === playerId);
+
+      if (player && !player.connected) {
+        return this.removePlayer(room, player);
+      }
+    }
+
+    return null;
   }
 
   getRoomForSocket(socketId) {
     const code = this.socketRooms.get(socketId);
     const room = code ? this.rooms.get(code) : null;
     return room ? this.toSnapshot(room) : null;
+  }
+
+  getPlayerForSocket(socketId) {
+    const code = this.socketRooms.get(socketId);
+    const room = code ? this.rooms.get(code) : null;
+    const player = room?.players.find((candidate) => candidate.socketId === socketId);
+    return player ? this.toPlayerSnapshot(player) : null;
   }
 
   getRoomSnapshot(code) {
@@ -186,13 +276,59 @@ export class RoomRegistry {
     throw new RoomError('ROOM_CODE_UNAVAILABLE', 'Could not create a unique room code.');
   }
 
-  createPlayer(id, name, slot) {
+  createPlayer(socketId, name, slot) {
     return {
-      id,
+      id: this.playerIdGenerator(),
+      socketId,
+      sessionToken: this.sessionTokenGenerator(),
       name,
       slot,
       side: PLAYER_SIDES[slot - 1],
       ready: false,
+      connected: true,
+    };
+  }
+
+  registerPlayerSession(room, player) {
+    this.sessions.set(player.sessionToken, {
+      roomCode: room.code,
+      playerId: player.id,
+    });
+  }
+
+  removePlayer(room, player) {
+    if (!player) {
+      return null;
+    }
+
+    const playerIndex = room.players.findIndex((candidate) => candidate.id === player.id);
+
+    if (playerIndex < 0) {
+      return null;
+    }
+
+    room.players.splice(playerIndex, 1);
+
+    if (player.socketId) {
+      this.socketRooms.delete(player.socketId);
+    }
+
+    this.sessions.delete(player.sessionToken);
+    const playerSnapshot = this.toPlayerSnapshot(player);
+
+    if (room.players.length === 0) {
+      this.rooms.delete(room.code);
+
+      return { room: null, roomCode: room.code, player: playerSnapshot };
+    }
+
+    room.phase = this.calculatePhase(room);
+    room.version += 1;
+
+    return {
+      room: this.toSnapshot(room),
+      roomCode: room.code,
+      player: playerSnapshot,
     };
   }
 
@@ -224,7 +360,7 @@ export class RoomRegistry {
       throw new RoomError('INVALID_NAME', 'Player name is required.');
     }
 
-    const normalizedName = name.trim();
+    const normalizedName = name.trim().replace(/\s+/g, ' ');
 
     if (normalizedName.length === 0 || normalizedName.length > MAX_NAME_LENGTH) {
       throw new RoomError(
@@ -252,7 +388,7 @@ export class RoomRegistry {
 
   calculatePhase(room) {
     const allPlayersReady = room.players.length === MAX_PLAYERS
-      && room.players.every((player) => player.ready);
+      && room.players.every((player) => player.ready && player.connected);
 
     return allPlayersReady ? ROOM_PHASES.READY : ROOM_PHASES.LOBBY;
   }
@@ -264,7 +400,18 @@ export class RoomRegistry {
       version: room.version,
       createdAt: room.createdAt,
       maxPlayers: MAX_PLAYERS,
-      players: room.players.map((player) => ({ ...player })),
+      players: room.players.map((player) => this.toPlayerSnapshot(player)),
+    };
+  }
+
+  toPlayerSnapshot(player) {
+    return {
+      id: player.id,
+      name: player.name,
+      slot: player.slot,
+      side: player.side,
+      ready: player.ready,
+      connected: player.connected,
     };
   }
 }

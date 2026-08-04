@@ -66,6 +66,7 @@ export class LobbyApp {
     this.unsubscribers = [
       this.client.onConnect(() => this.handleConnect()),
       this.client.onDisconnect(() => this.handleDisconnect()),
+      this.client.onConnectionReady((payload) => this.handleConnectionReady(payload)),
       this.client.onRoomState((room) => this.handleRoomState(room)),
       this.client.onMatchReady((payload) => this.handleMatchReady(payload)),
     ];
@@ -132,14 +133,32 @@ export class LobbyApp {
       return;
     }
 
-    const wasInRoom = Boolean(this.room);
     this.connectionStatus = 'disconnected';
-    this.room = null;
     this.isBusy = false;
-    this.errorMessage = wasInRoom
-      ? 'La conexion se perdio. Vuelve a entrar a la sala.'
+    this.errorMessage = this.room
+      ? 'La conexion se perdio. Intentando recuperar tu espacio...'
       : 'Se perdio la conexion con el servidor.';
     this.render();
+  }
+
+  handleConnectionReady(payload) {
+    if (this.isDestroyed) {
+      return;
+    }
+
+    if (payload?.resumed && payload.room) {
+      this.room = payload.room;
+      this.errorMessage = '';
+      this.noticeMessage = 'Tu espacio fue recuperado.';
+      this.render();
+      return;
+    }
+
+    if (this.room) {
+      this.room = null;
+      this.errorMessage = 'No fue posible recuperar tu espacio en la sala.';
+      this.render();
+    }
   }
 
   handleRoomState(room) {
@@ -482,11 +501,14 @@ export class LobbyApp {
 
     const roomControls = createElement('section', { className: 'room-controls' });
     const localPlayer = getLocalPlayer(this.room, this.client.playerId);
+    const connectedPlayerCount = this.room.players.filter(
+      (player) => player.connected !== false,
+    ).length;
     const occupancy = createElement('div', { className: 'occupancy' });
     const occupancyText = createElement('div');
     occupancyText.append(
       createElement('strong', {
-        text: `${this.room.players.length} / ${this.room.maxPlayers}`,
+        text: `${connectedPlayerCount} / ${this.room.maxPlayers}`,
       }),
       createElement('span', { text: 'JUGADORES CONECTADOS' }),
     );
@@ -494,7 +516,7 @@ export class LobbyApp {
 
     for (let index = 0; index < this.room.maxPlayers; index += 1) {
       progress.append(createElement('span', {
-        className: index < this.room.players.length ? 'progress-active' : '',
+        className: index < connectedPlayerCount ? 'progress-active' : '',
       }));
     }
 
@@ -522,6 +544,7 @@ export class LobbyApp {
   }
 
   renderPlayerSlot(slot) {
+    const isConnected = slot.player?.connected !== false;
     const card = createElement('article', {
       className: `player-slot slot-${slot.side}${slot.isLocal ? ' slot-local' : ''}`,
     });
@@ -541,13 +564,25 @@ export class LobbyApp {
         text: slot.occupied ? slot.player.name : 'Espacio disponible',
       }),
       createElement('span', {
-        text: slot.isLocal ? 'TU ESPACIO' : slot.occupied ? 'JUGADOR CONECTADO' : 'ESPERANDO JUGADOR',
+        text: slot.isLocal
+          ? 'TU ESPACIO'
+          : slot.occupied && !isConnected
+            ? 'RECONECTANDO'
+            : slot.occupied
+              ? 'JUGADOR CONECTADO'
+              : 'ESPERANDO JUGADOR',
       }),
     );
 
     const status = createElement('span', {
-      className: `ready-chip ${slot.player?.ready ? 'ready-yes' : 'ready-no'}`,
-      text: slot.player?.ready ? 'LISTO' : slot.occupied ? 'ESPERANDO' : 'LIBRE',
+      className: `ready-chip ${slot.player?.ready && isConnected ? 'ready-yes' : 'ready-no'}`,
+      text: slot.occupied && !isConnected
+        ? 'RECONECTANDO'
+        : slot.player?.ready
+          ? 'LISTO'
+          : slot.occupied
+            ? 'ESPERANDO'
+            : 'LIBRE',
     });
     card.append(slotTop, avatar, identity, status);
     return card;

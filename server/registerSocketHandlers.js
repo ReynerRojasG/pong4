@@ -38,9 +38,84 @@ export function registerSocketHandlers({
   matchManager,
   roomRegistry,
   logger = console,
+  disconnectGraceMs = 10000,
 }) {
+  const pendingDisconnects = new Map();
+
+  function cancelPendingDisconnect(playerId) {
+    const pending = pendingDisconnects.get(playerId);
+
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timeout);
+    pendingDisconnects.delete(playerId);
+  }
+
+  function scheduleDisconnectedPlayerRemoval(result) {
+    cancelPendingDisconnect(result.player.id);
+
+    const timeout = setTimeout(() => {
+      pendingDisconnects.delete(result.player.id);
+      const leaveResult = roomRegistry.removeDisconnectedPlayer(result.player.id);
+
+      if (!leaveResult) {
+        return;
+      }
+
+      matchManager.endMatch(leaveResult.roomCode, 'reconnect-timeout');
+
+      if (leaveResult.room) {
+        io.to(leaveResult.roomCode).emit(SERVER_EVENTS.ROOM_STATE, leaveResult.room);
+      }
+    }, disconnectGraceMs);
+
+    pendingDisconnects.set(result.player.id, {
+      roomCode: result.roomCode,
+      timeout,
+    });
+  }
+
   io.on('connection', (socket) => {
-    socket.emit(SERVER_EVENTS.CONNECTION_READY, { playerId: socket.id });
+    const resumeResult = roomRegistry.reconnectPlayer({
+      socketId: socket.id,
+      sessionToken: socket.handshake.auth?.sessionToken,
+    });
+
+    if (resumeResult) {
+      cancelPendingDisconnect(resumeResult.player.id);
+      socket.data.roomCode = resumeResult.room.code;
+      socket.data.playerId = resumeResult.player.id;
+      Promise.resolve(socket.join(resumeResult.room.code)).then(() => {
+        const activeRoom = roomRegistry.getRoomForSocket(socket.id);
+
+        if (!socket.connected || activeRoom?.code !== resumeResult.room.code) {
+          return;
+        }
+
+        socket.emit(SERVER_EVENTS.CONNECTION_READY, {
+          playerId: resumeResult.player.id,
+          resumed: true,
+          room: resumeResult.room,
+        });
+        io.to(resumeResult.room.code).emit(SERVER_EVENTS.ROOM_STATE, resumeResult.room);
+
+        const state = matchManager.getState(resumeResult.room.code);
+
+        if (state) {
+          socket.emit(SERVER_EVENTS.MATCH_READY, {
+            room: resumeResult.room,
+            state,
+          });
+        }
+      }).catch((error) => logger.error('Could not restore socket room:', error));
+    } else {
+      socket.emit(SERVER_EVENTS.CONNECTION_READY, {
+        playerId: socket.id,
+        resumed: false,
+      });
+    }
 
     socket.on(CLIENT_EVENTS.CREATE_ROOM, async (payload, acknowledge) => {
       let createdRoomCode = null;
@@ -54,11 +129,13 @@ export function registerSocketHandlers({
 
         await socket.join(createdRoomCode);
         socket.data.roomCode = createdRoomCode;
+        socket.data.playerId = result.player.id;
         io.to(createdRoomCode).emit(SERVER_EVENTS.ROOM_STATE, result.room);
 
         sendAcknowledgement(acknowledge, {
           ok: true,
-          playerId: socket.id,
+          playerId: result.player.id,
+          sessionToken: result.sessionToken,
           room: result.room,
         });
       } catch (error) {
@@ -83,11 +160,13 @@ export function registerSocketHandlers({
 
         await socket.join(joinedRoomCode);
         socket.data.roomCode = joinedRoomCode;
+        socket.data.playerId = result.player.id;
         io.to(joinedRoomCode).emit(SERVER_EVENTS.ROOM_STATE, result.room);
 
         sendAcknowledgement(acknowledge, {
           ok: true,
-          playerId: socket.id,
+          playerId: result.player.id,
+          sessionToken: result.sessionToken,
           room: result.room,
         });
       } catch (error) {
@@ -149,9 +228,14 @@ export function registerSocketHandlers({
     socket.on(CLIENT_EVENTS.LEAVE_ROOM, async (_payload, acknowledge) => {
       try {
         const activeRoomCode = socket.data.roomCode;
+        const activePlayerId = socket.data.playerId;
 
         if (activeRoomCode) {
           matchManager.endMatch(activeRoomCode, 'player-left');
+        }
+
+        if (activePlayerId) {
+          cancelPendingDisconnect(activePlayerId);
         }
 
         const result = roomRegistry.leaveRoom(socket.id);
@@ -159,6 +243,7 @@ export function registerSocketHandlers({
         if (result) {
           await socket.leave(result.roomCode);
           delete socket.data.roomCode;
+          delete socket.data.playerId;
 
           if (result.room) {
             io.to(result.roomCode).emit(SERVER_EVENTS.ROOM_STATE, result.room);
@@ -172,17 +257,20 @@ export function registerSocketHandlers({
     });
 
     socket.on('disconnect', () => {
-      const activeRoomCode = socket.data.roomCode;
+      const result = roomRegistry.disconnectSocket(socket.id);
 
-      if (activeRoomCode) {
-        matchManager.endMatch(activeRoomCode, 'player-disconnected');
-      }
-
-      const result = roomRegistry.leaveRoom(socket.id);
-
-      if (result?.room) {
+      if (result) {
         io.to(result.roomCode).emit(SERVER_EVENTS.ROOM_STATE, result.room);
+        scheduleDisconnectedPlayerRemoval(result);
       }
     });
   });
+
+  return () => {
+    for (const pending of pendingDisconnects.values()) {
+      clearTimeout(pending.timeout);
+    }
+
+    pendingDisconnects.clear();
+  };
 }

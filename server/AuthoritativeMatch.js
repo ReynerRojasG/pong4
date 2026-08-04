@@ -1,7 +1,6 @@
 import {
   MATCH_CONFIG,
   MATCH_PHASES,
-  SCORING_SIDE_BY_GOAL,
   getInitialPlayerPosition,
   getPlayerZone,
 } from '../shared/matchConfig.js';
@@ -31,6 +30,7 @@ export class AuthoritativeMatch {
     config = MATCH_CONFIG,
     random = Math.random,
     now = Date.now,
+    goalLogger = null,
   }) {
     if (!room || room.players?.length !== 4) {
       throw new MatchError('INVALID_MATCH_ROOM', 'A match requires four players.');
@@ -40,13 +40,17 @@ export class AuthoritativeMatch {
     this.config = config;
     this.random = random;
     this.now = now;
+    this.goalLogger = typeof goalLogger === 'function' ? goalLogger : null;
     this.phase = MATCH_PHASES.COUNTDOWN;
     this.countdownRemaining = config.countdownMs;
     this.goalPauseRemaining = 0;
     this.timeRemaining = config.durationMs;
     this.sequence = 0;
+    this.roundId = 1;
+    this.goalInProgress = false;
     this.lastGoal = null;
     this.finishedAt = null;
+    this.activePaddleContacts = new Set();
 
     this.players = room.players.map((player) => {
       const position = getInitialPlayerPosition(player.side, config);
@@ -69,6 +73,7 @@ export class AuthoritativeMatch {
       y: config.fieldHeight / 2,
       velocityX: 0,
       velocityY: 0,
+      lastTouchPlayerId: null,
     };
   }
 
@@ -119,6 +124,7 @@ export class AuthoritativeMatch {
       this.goalPauseRemaining = Math.max(0, this.goalPauseRemaining - deltaMs);
 
       if (this.goalPauseRemaining === 0) {
+        this.beginNextRound();
         this.phase = MATCH_PHASES.PLAYING;
         this.launchBall();
       }
@@ -166,6 +172,14 @@ export class AuthoritativeMatch {
     this.ball.y = this.config.fieldHeight / 2;
     this.ball.velocityX = Math.cos(angle) * this.config.initialBallSpeed;
     this.ball.velocityY = Math.sin(angle) * this.config.initialBallSpeed;
+  }
+
+  beginNextRound() {
+    this.roundId += 1;
+    this.goalInProgress = false;
+    this.lastGoal = null;
+    this.ball.lastTouchPlayerId = null;
+    this.activePaddleContacts.clear();
   }
 
   createLaunchAngle() {
@@ -270,6 +284,8 @@ export class AuthoritativeMatch {
 
   handlePaddleCollisions() {
     const collisionDistance = this.config.ballRadius + this.config.playerRadius;
+    const currentContacts = new Set();
+    let collisionProcessed = false;
 
     for (const player of this.players) {
       const deltaX = this.ball.x - player.x;
@@ -277,6 +293,12 @@ export class AuthoritativeMatch {
       const distance = Math.hypot(deltaX, deltaY);
 
       if (distance === 0 || distance >= collisionDistance) {
+        continue;
+      }
+
+      currentContacts.add(player.id);
+
+      if (collisionProcessed || this.activePaddleContacts.has(player.id)) {
         continue;
       }
 
@@ -292,10 +314,14 @@ export class AuthoritativeMatch {
         continue;
       }
 
+      this.ball.lastTouchPlayerId = player.id;
       this.ball.velocityX -= 2 * velocityAlongNormal * normalX;
       this.ball.velocityY -= 2 * velocityAlongNormal * normalY;
       this.increaseBallSpeed();
+      collisionProcessed = true;
     }
+
+    this.activePaddleContacts = currentContacts;
   }
 
   increaseBallSpeed() {
@@ -315,26 +341,105 @@ export class AuthoritativeMatch {
   }
 
   registerGoal(goalSide) {
-    const scoringSide = SCORING_SIDE_BY_GOAL[goalSide];
-    const scoringPlayer = this.players.find((player) => player.side === scoringSide);
+    const goalEventId = `${this.roomCode}:${this.roundId}:${this.sequence}`;
 
-    if (!scoringPlayer) {
-      return;
+    if (this.phase !== MATCH_PHASES.PLAYING || this.goalInProgress) {
+      this.logIgnoredGoal({
+        goalEventId,
+        goalSide,
+        reason: this.goalInProgress ? 'goal-in-progress' : `invalid-phase-${this.phase}`,
+      });
+      return false;
     }
 
-    scoringPlayer.score += 1;
+    const concedingPlayer = this.players.find((player) => player.side === goalSide);
+
+    if (!concedingPlayer) {
+      this.logIgnoredGoal({
+        goalEventId,
+        goalSide,
+        reason: 'conceding-player-not-found',
+      });
+      return false;
+    }
+
+    this.goalInProgress = true;
+    const scoreBefore = this.getScoresByPlayerId();
+    const lastTouchPlayer = this.players.find(
+      (player) => player.id === this.ball.lastTouchPlayerId,
+    ) ?? null;
+    const scoringPlayer = lastTouchPlayer?.id !== concedingPlayer.id
+      ? lastTouchPlayer
+      : null;
+
+    if (scoringPlayer) {
+      scoringPlayer.score += 1;
+    }
+
+    const scoreAfter = this.getScoresByPlayerId();
     this.phase = MATCH_PHASES.GOAL;
     this.goalPauseRemaining = this.config.goalPauseMs;
     this.lastGoal = {
+      goalEventId,
+      roundId: this.roundId,
       goalSide,
-      scoringSide,
-      scoringPlayerId: scoringPlayer.id,
+      concedingPlayerId: concedingPlayer.id,
+      lastTouchPlayerId: lastTouchPlayer?.id ?? null,
+      scoringPlayerId: scoringPlayer?.id ?? null,
+      awarded: Boolean(scoringPlayer),
       sequence: this.sequence,
     };
     this.ball.x = this.config.fieldWidth / 2;
     this.ball.y = this.config.fieldHeight / 2;
     this.ball.velocityX = 0;
     this.ball.velocityY = 0;
+    this.ball.lastTouchPlayerId = null;
+    this.activePaddleContacts.clear();
+
+    this.logGoal({
+      goalEventId,
+      goalSide,
+      concedingPlayerId: concedingPlayer.id,
+      lastTouchPlayerId: lastTouchPlayer?.id ?? null,
+      scoringPlayerId: scoringPlayer?.id ?? null,
+      scoreBefore,
+      scoreAfter,
+    });
+
+    return true;
+  }
+
+  getScoresByPlayerId() {
+    return Object.fromEntries(
+      this.players.map((player) => [player.id, player.score]),
+    );
+  }
+
+  logGoal({
+    goalEventId,
+    goalSide,
+    concedingPlayerId,
+    lastTouchPlayerId,
+    scoringPlayerId,
+    scoreBefore,
+    scoreAfter,
+  }) {
+    this.goalLogger?.(
+      `[GOAL] roomId=${this.roomCode} roundId=${this.roundId}`
+      + ` goalEventId=${goalEventId} goalSide=${goalSide}`
+      + ` concedingPlayerId=${concedingPlayerId}`
+      + ` lastTouchPlayerId=${lastTouchPlayerId ?? 'none'}`
+      + ` scoringPlayerId=${scoringPlayerId ?? 'none'}`
+      + ` scoreBefore=${JSON.stringify(scoreBefore)}`
+      + ` scoreAfter=${JSON.stringify(scoreAfter)}`,
+    );
+  }
+
+  logIgnoredGoal({ goalEventId, goalSide, reason }) {
+    this.goalLogger?.(
+      `[GOAL_IGNORED] roomId=${this.roomCode} roundId=${this.roundId}`
+      + ` goalEventId=${goalEventId} goalSide=${goalSide} reason=${reason}`,
+    );
   }
 
   getSnapshot() {
@@ -348,8 +453,10 @@ export class AuthoritativeMatch {
     return {
       roomCode: this.roomCode,
       sequence: this.sequence,
+      roundId: this.roundId,
       serverTime: this.now(),
       phase: this.phase,
+      goalInProgress: this.goalInProgress,
       countdownRemaining: Math.ceil(this.countdownRemaining / 1000),
       goalPauseRemaining: Math.ceil(this.goalPauseRemaining),
       timeRemaining: Math.ceil(this.timeRemaining),
@@ -362,6 +469,7 @@ export class AuthoritativeMatch {
         y: round(this.ball.y),
         velocityX: round(this.ball.velocityX),
         velocityY: round(this.ball.velocityY),
+        lastTouchPlayerId: this.ball.lastTouchPlayerId,
       },
       players: this.players.map((player) => ({
         id: player.id,

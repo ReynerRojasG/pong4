@@ -7,11 +7,13 @@ export class MatchManager {
     io,
     roomRegistry,
     now = Date.now,
+    goalLogger = null,
     createMatch = (options) => new AuthoritativeMatch(options),
   }) {
     this.io = io;
     this.roomRegistry = roomRegistry;
     this.now = now;
+    this.goalLogger = goalLogger;
     this.createMatch = createMatch;
     this.matches = new Map();
   }
@@ -23,7 +25,11 @@ export class MatchManager {
   startMatch(room) {
     this.endMatch(room.code, 'replaced', { emit: false });
 
-    const match = this.createMatch({ room, now: this.now });
+    const match = this.createMatch({
+      room,
+      now: this.now,
+      goalLogger: this.goalLogger,
+    });
     const loop = {
       match,
       lastTickAt: this.now(),
@@ -42,8 +48,9 @@ export class MatchManager {
 
   setPaddleTarget(socketId, input) {
     const room = this.roomRegistry.getRoomForSocket(socketId);
+    const player = this.roomRegistry.getPlayerForSocket(socketId);
 
-    if (!room) {
+    if (!room || !player) {
       throw new MatchError('MATCH_NOT_FOUND', 'Player is not in a room.');
     }
 
@@ -53,7 +60,12 @@ export class MatchManager {
       throw new MatchError('MATCH_NOT_FOUND', 'Match is not active.');
     }
 
-    loop.match.setPaddleTarget(socketId, input);
+    loop.match.setPaddleTarget(player.id, input);
+  }
+
+  getState(roomCode) {
+    const loop = this.matches.get(roomCode);
+    return loop ? loop.match.getSnapshot() : null;
   }
 
   tick(roomCode) {

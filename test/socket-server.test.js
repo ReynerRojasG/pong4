@@ -9,12 +9,13 @@ import {
   SERVER_EVENTS,
 } from '../shared/protocol.js';
 
-function connectClient(url) {
+function connectClient(url, socketOptions = {}) {
   return new Promise((resolve, reject) => {
     const socket = createSocketClient(url, {
       forceNew: true,
       reconnection: false,
       transports: ['websocket'],
+      ...socketOptions,
     });
 
     const handleError = (error) => {
@@ -77,8 +78,13 @@ async function waitForCondition(predicate) {
 
 test('supports a complete four-player room lifecycle over Socket.IO', async () => {
   const roomRegistry = new RoomRegistry({ codeGenerator: () => 'ROOM24' });
-  const applicationServer = createApplicationServer({ roomRegistry });
+  const applicationServer = createApplicationServer({
+    roomRegistry,
+    disconnectGraceMs: 250,
+    goalLogsEnabled: false,
+  });
   const clients = [];
+  const playerSessions = [];
 
   await new Promise((resolve) => {
     applicationServer.httpServer.listen(0, '127.0.0.1', resolve);
@@ -107,6 +113,7 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
     );
     assert.equal(createResponse.ok, true);
     assert.equal(createResponse.room.code, 'ROOM24');
+    playerSessions[0] = createResponse;
 
     const activeHealthResponse = await fetch(`${url}/health`);
     assert.deepEqual(await activeHealthResponse.json(), {
@@ -123,6 +130,7 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
       );
       assert.equal(joinResponse.ok, true);
       assert.equal(joinResponse.room.players.length, index + 1);
+      playerSessions[index] = joinResponse;
     }
 
     const fullResponse = await emitWithAcknowledgement(
@@ -167,7 +175,7 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
       assert.equal(state.timeRemaining, referenceState.timeRemaining);
     }
 
-    const controlledPlayerId = clients[1].id;
+    const controlledPlayerId = playerSessions[1].playerId;
     const movedPaddleState = waitForEvent(
       clients[0],
       SERVER_EVENTS.MATCH_STATE,
@@ -184,6 +192,55 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
     assert.equal(controlledPlayer.side, 'top');
     assert.ok(controlledPlayer.y >= 30);
 
+    const reconnectingPlayerId = playerSessions[3].playerId;
+    const activeMatch = applicationServer.matchManager.matches.get('ROOM24').match;
+    activeMatch.players.find((player) => player.id === reconnectingPlayerId).score = 4;
+    const disconnectedRoomState = waitForEvent(
+      clients[0],
+      SERVER_EVENTS.ROOM_STATE,
+      (room) => room.players.some(
+        (player) => player.id === reconnectingPlayerId && !player.connected,
+      ),
+    );
+    clients[3].disconnect();
+    await disconnectedRoomState;
+
+    const resumedClient = createSocketClient(url, {
+      autoConnect: false,
+      forceNew: true,
+      reconnection: false,
+      transports: ['websocket'],
+      auth: { sessionToken: playerSessions[3].sessionToken },
+    });
+    clients.push(resumedClient);
+    const connectionReady = waitForEvent(
+      resumedClient,
+      SERVER_EVENTS.CONNECTION_READY,
+      (payload) => payload.resumed,
+    );
+    const resumedMatchReady = waitForEvent(
+      resumedClient,
+      SERVER_EVENTS.MATCH_READY,
+    );
+    resumedClient.connect();
+
+    const [resumedConnection, resumedMatch] = await Promise.all([
+      connectionReady,
+      resumedMatchReady,
+    ]);
+    const resumedPlayer = resumedConnection.room.players.find(
+      (player) => player.id === reconnectingPlayerId,
+    );
+
+    assert.equal(resumedConnection.playerId, reconnectingPlayerId);
+    assert.equal(resumedPlayer.name, 'PC4');
+    assert.equal(resumedPlayer.side, 'bottom');
+    assert.equal(resumedPlayer.connected, true);
+    assert.equal(
+      resumedMatch.state.players.find((player) => player.id === reconnectingPlayerId).score,
+      4,
+    );
+
     const roomAfterDisconnect = waitForEvent(
       clients[0],
       SERVER_EVENTS.ROOM_STATE,
@@ -193,12 +250,12 @@ test('supports a complete four-player room lifecycle over Socket.IO', async () =
       clients[0],
       SERVER_EVENTS.MATCH_ENDED,
     );
-    clients[3].disconnect();
+    resumedClient.disconnect();
 
     const disconnectPayload = await roomAfterDisconnect;
     const matchEndedPayload = await matchAfterDisconnect;
     assert.equal(disconnectPayload.phase, ROOM_PHASES.LOBBY);
-    assert.equal(matchEndedPayload.reason, 'player-disconnected');
+    assert.equal(matchEndedPayload.reason, 'reconnect-timeout');
     assert.equal(applicationServer.matchManager.size, 0);
 
     for (const client of clients) {

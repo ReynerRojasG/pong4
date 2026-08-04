@@ -7,13 +7,18 @@ import {
 import { ROOM_PHASES } from '../shared/protocol.js';
 
 function createRegistry(code = 'ABC234') {
+  let playerSequence = 0;
+  let sessionSequence = 0;
+
   return new RoomRegistry({
     codeGenerator: () => code,
+    playerIdGenerator: () => `player-${playerSequence += 1}`,
+    sessionTokenGenerator: () => `session-${sessionSequence += 1}`,
     now: () => 123456789,
   });
 }
 
-test('creates a room with PC1 assigned to the left side', () => {
+test('creates a room with a stable player id assigned to the left side', () => {
   const registry = createRegistry();
   const result = registry.createRoom({ socketId: 'socket-1', name: 'PC1' });
 
@@ -23,12 +28,15 @@ test('creates a room with PC1 assigned to the left side', () => {
   assert.equal(result.room.maxPlayers, 4);
   assert.equal(result.room.createdAt, 123456789);
   assert.deepEqual(result.player, {
-    id: 'socket-1',
+    id: 'player-1',
     name: 'PC1',
     slot: 1,
     side: 'left',
     ready: false,
+    connected: true,
   });
+  assert.equal(result.sessionToken, 'session-1');
+  assert.equal('sessionToken' in result.room.players[0], false);
 });
 
 test('assigns the four fixed sides and rejects a fifth player', () => {
@@ -112,7 +120,11 @@ test('validates names, room codes, ready values and duplicate membership', () =>
     (error) => error.code === 'INVALID_NAME',
   );
 
-  registry.createRoom({ socketId: 'socket-1', name: ' PC1 ' });
+  const normalized = registry.createRoom({
+    socketId: 'socket-1',
+    name: ' PC1\nPlayer ',
+  });
+  assert.equal(normalized.player.name, 'PC1 Player');
 
   assert.throws(
     () => registry.createRoom({ socketId: 'socket-1', name: 'PC1' }),
@@ -126,4 +138,44 @@ test('validates names, room codes, ready values and duplicate membership', () =>
     () => registry.setReady({ socketId: 'socket-1', ready: 'yes' }),
     (error) => error.code === 'INVALID_READY',
   );
+});
+
+test('reconnects a player with the same id, name and side', () => {
+  const registry = createRegistry();
+  const created = registry.createRoom({ socketId: 'socket-1', name: 'Isaac' });
+  const disconnected = registry.disconnectSocket('socket-1');
+
+  assert.equal(disconnected.player.connected, false);
+  assert.equal(disconnected.player.id, created.player.id);
+  assert.equal(registry.getRoomForSocket('socket-1'), null);
+
+  const reconnected = registry.reconnectPlayer({
+    socketId: 'socket-2',
+    sessionToken: created.sessionToken,
+  });
+
+  assert.deepEqual(reconnected.player, {
+    ...created.player,
+    connected: true,
+  });
+  assert.equal(reconnected.player.name, 'Isaac');
+  assert.equal(reconnected.player.side, 'left');
+  assert.equal(registry.getPlayerForSocket('socket-2').id, created.player.id);
+  assert.equal(registry.removeDisconnectedPlayer(created.player.id), null);
+});
+
+test('removes a disconnected player only after explicit cleanup', () => {
+  const registry = createRegistry();
+  const created = registry.createRoom({ socketId: 'socket-1', name: 'Isaac' });
+
+  registry.disconnectSocket('socket-1');
+  assert.equal(registry.getRoomSnapshot('ABC234').players.length, 1);
+
+  const removed = registry.removeDisconnectedPlayer(created.player.id);
+  assert.equal(removed.room, null);
+  assert.equal(registry.size, 0);
+  assert.equal(registry.reconnectPlayer({
+    socketId: 'socket-2',
+    sessionToken: created.sessionToken,
+  }), null);
 });

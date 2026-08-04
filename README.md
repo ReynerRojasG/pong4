@@ -33,7 +33,7 @@ npm run dev
 
 El cliente usa `http://127.0.0.1:5173` y el servidor usa `http://127.0.0.1:3000` por defecto. El estado del servidor esta disponible en `GET /health` e incluye la cantidad de salas y partidas activas.
 
-Las variables disponibles estan documentadas en `.env.example`. `CLIENT_ORIGIN` permite varios origenes separados por comas y `VITE_SERVER_URL` cambia la URL usada por el cliente.
+Las variables disponibles estan documentadas en `.env.example`. `CLIENT_ORIGIN` permite varios origenes separados por comas, `VITE_SERVER_URL` cambia la URL usada por el cliente y `PONG_GOAL_LOGS=0` desactiva los logs de diagnostico de goles durante el desarrollo. En produccion estos logs estan desactivados salvo que se configure `PONG_GOAL_LOGS=1`.
 
 ## Probar cuatro jugadores
 
@@ -58,7 +58,7 @@ Si el backend no esta disponible, `JUGAR EN MODO LOCAL` mantiene accesible el pr
 
 ## Protocolo de salas
 
-Cada sala admite un maximo de cuatro jugadores. Los espacios se asignan en este orden y se mantienen mientras el jugador siga conectado:
+Cada sala admite un maximo de cuatro jugadores. Los espacios se asignan en este orden y se mantienen durante una ventana de reconexion de 10 segundos:
 
 1. PC1: `left`.
 2. PC2: `top`.
@@ -94,7 +94,11 @@ En modo local, PC1 es la paleta azul del lado izquierdo y la partida se ejecuta 
 
 En una sala, cada cliente controla con el puntero la paleta del lado que recibio en el lobby. El servidor limita la posicion al area asignada, calcula la partida y evita que un socket controle otra paleta.
 
-Cuando la pelota sale por un lado, el punto se asigna al jugador del lado opuesto. El servidor devuelve la pelota al centro, espera una pausa corta y realiza un unico saque.
+Cuando la pelota sale por un lado, el servidor consulta el ID estable del ultimo jugador que tuvo una colision valida con la pelota. Ese jugador recibe el punto solo si es diferente al propietario del lado que concedio el gol. Si no existe un ultimo toque valido, no se inventa un beneficiario.
+
+Un autogol no otorga puntos. Esta es la opcion segura porque el juego no conserva un historial suficiente para elegir de forma confiable a un rival anterior. La ronda se reinicia normalmente, el ultimo toque se limpia y el siguiente saque comienza con un identificador de ronda nuevo.
+
+El servidor protege cada ronda con `goalInProgress`, mantiene el puntaje oficial y emite snapshots completos. El cliente solo reemplaza el valor mostrado con el puntaje recibido; nunca suma un gol localmente. Los nombres se relacionan con el ID estable del jugador y se truncan solo para mostrarlos, sin alterar el valor almacenado.
 
 ## Probar el modo de produccion
 
@@ -139,7 +143,7 @@ No es necesario definir `VITE_SERVER_URL` para este deploy de un solo servicio. 
 
 ## Limites actuales
 
-- No existe recuperacion de sesion despues de una desconexion.
+- La recuperacion de sesion cubre desconexiones de hasta 10 segundos y conserva nombre, lado y puntaje. Una ausencia mayor termina la partida.
 - Las salas y partidas viven en memoria y se pierden si el servicio reinicia.
 - El deploy debe usar una sola replica hasta agregar Redis y el adaptador de Socket.IO.
 - La duracion de la partida multijugador esta fijada en dos minutos.

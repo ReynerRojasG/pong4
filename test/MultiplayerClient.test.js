@@ -42,7 +42,10 @@ test('provides a reusable client for acknowledged room operations', async () => 
     const roomState = await roomStatePromise;
 
     assert.equal(createResponse.room.code, 'CLIENT');
-    assert.equal(roomState.players[0].id, playerId);
+    assert.equal(roomState.players[0].id, createResponse.playerId);
+    assert.equal(client.playerId, createResponse.playerId);
+    assert.equal(typeof createResponse.sessionToken, 'string');
+    assert.equal('sessionToken' in roomState.players[0], false);
 
     const leaveResponse = await client.leaveRoom();
     assert.deepEqual(leaveResponse, { ok: true, room: null });

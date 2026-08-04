@@ -13,12 +13,20 @@ const DEFAULT_ORIGINS = [
   'http://localhost:5173',
 ];
 const DEFAULT_CLIENT_DIST_PATH = fileURLToPath(new URL('../dist', import.meta.url));
+const DEFAULT_DISCONNECT_GRACE_MS = 10000;
+const DEFAULT_GOAL_LOGS_ENABLED = process.env.PONG_GOAL_LOGS === '1'
+  || (
+    process.env.PONG_GOAL_LOGS !== '0'
+    && process.env.NODE_ENV !== 'production'
+  );
 
 export function createApplicationServer({
   allowedOrigins = DEFAULT_ORIGINS,
   clientDistPath = DEFAULT_CLIENT_DIST_PATH,
   logger = console,
   roomRegistry = new RoomRegistry(),
+  disconnectGraceMs = DEFAULT_DISCONNECT_GRACE_MS,
+  goalLogsEnabled = DEFAULT_GOAL_LOGS_ENABLED,
 } = {}) {
   const app = express();
   const httpServer = createServer(app);
@@ -27,8 +35,15 @@ export function createApplicationServer({
       origin: allowedOrigins,
       methods: ['GET', 'POST'],
     },
+    connectionStateRecovery: {
+      maxDisconnectionDuration: disconnectGraceMs,
+      skipMiddlewares: true,
+    },
   });
-  const matchManager = new MatchManager({ io, roomRegistry });
+  const goalLogger = goalLogsEnabled
+    ? (message) => logger.info?.(message)
+    : null;
+  const matchManager = new MatchManager({ io, roomRegistry, goalLogger });
 
   app.use(express.json({ limit: '16kb' }));
 
@@ -52,9 +67,16 @@ export function createApplicationServer({
     });
   }
 
-  registerSocketHandlers({ io, matchManager, roomRegistry, logger });
+  const cleanupSocketHandlers = registerSocketHandlers({
+    io,
+    matchManager,
+    roomRegistry,
+    logger,
+    disconnectGraceMs,
+  });
 
   const close = () => new Promise((resolve, reject) => {
+    cleanupSocketHandlers();
     matchManager.close();
 
     if (!httpServer.listening) {

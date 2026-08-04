@@ -22,13 +22,6 @@ export const MATCH_CONFIG = Object.freeze({
   snapshotRate: 20,
 });
 
-export const SCORING_SIDE_BY_GOAL = Object.freeze({
-  top: 'bottom',
-  right: 'left',
-  bottom: 'top',
-  left: 'right',
-});
-
 export function getPlayerZone(side, config = MATCH_CONFIG) {
   const {
     fieldWidth,

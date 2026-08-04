@@ -2,6 +2,10 @@ import Phaser from 'phaser';
 import { ArcadeBoard } from '../game/ArcadeBoard.js';
 import { SIDE_COLORS } from '../game/Constants.js';
 import { MATCH_PHASES } from '../../shared/matchConfig.js';
+import {
+  formatPlayerScoreLabel,
+  getPlayerDisplayName,
+} from './playerLabel.js';
 
 const INPUT_INTERVAL_MS = 1000 / 30;
 const ENTITY_LERP = 0.34;
@@ -26,6 +30,7 @@ export class MultiplayerBoardScene extends Phaser.Scene {
     this.nextInputAt = 0;
     this.lastGoalSequence = null;
     this.hasEnded = false;
+    this.connectionLost = false;
   }
 
   create() {
@@ -40,10 +45,9 @@ export class MultiplayerBoardScene extends Phaser.Scene {
       this.client.onMatchState((state) => this.receiveState(state)),
       this.client.onMatchEnded((payload) => this.receiveMatchEnd(payload)),
       this.client.onMatchError((error) => this.showNetworkMessage(error.message)),
-      this.client.onDisconnect(() => this.receiveMatchEnd({
-        reason: 'connection-lost',
-        state: this.latestState,
-      })),
+      this.client.onDisconnect(() => this.handleDisconnect()),
+      this.client.onConnect(() => this.handleConnect()),
+      this.client.onConnectionReady((payload) => this.handleConnectionReady(payload)),
     ];
 
     this.scale.on('resize', this.layoutBoard, this);
@@ -57,14 +61,14 @@ export class MultiplayerBoardScene extends Phaser.Scene {
 
     this.interpolateEntities();
 
-    if (time >= this.nextInputAt) {
+    if (!this.connectionLost && time >= this.nextInputAt) {
       this.nextInputAt = time + INPUT_INTERVAL_MS;
       this.sendPaddleInput();
     }
   }
 
   createEntities() {
-    for (const player of this.room.players) {
+    for (const player of this.latestState?.players ?? this.room.players) {
       const color = SIDE_COLORS[player.side];
       const glow = this.add.circle(0, 0, 38, color, 0.2).setDepth(10);
       const disk = this.add.circle(0, 0, 30, color, 0.92).setDepth(11);
@@ -98,7 +102,7 @@ export class MultiplayerBoardScene extends Phaser.Scene {
       strokeThickness: 5,
     };
 
-    for (const player of this.room.players) {
+    for (const player of this.latestState?.players ?? this.room.players) {
       const color = `#${SIDE_COLORS[player.side].toString(16).padStart(6, '0')}`;
       const text = this.add.text(0, 0, '', { ...scoreStyle, color }).setDepth(900);
       this.scoreTexts.set(player.id, text);
@@ -140,8 +144,14 @@ export class MultiplayerBoardScene extends Phaser.Scene {
       return;
     }
 
+    const recoveredConnection = this.connectionLost;
     this.latestState = state;
+    this.connectionLost = false;
     this.applyState(state, false);
+
+    if (recoveredConnection) {
+      this.showNetworkMessage('Partida recuperada.');
+    }
   }
 
   receiveMatchEnd(payload) {
@@ -179,7 +189,7 @@ export class MultiplayerBoardScene extends Phaser.Scene {
         this.setPlayerViewPosition(view, position.x, position.y);
       }
 
-      this.scoreTexts.get(player.id)?.setText(`PC${player.slot}  ${player.score}`);
+      this.scoreTexts.get(player.id)?.setText(formatPlayerScoreLabel(player));
     }
 
     const ballPosition = this.serverToWorld(state.ball.x, state.ball.y, state.field);
@@ -206,11 +216,20 @@ export class MultiplayerBoardScene extends Phaser.Scene {
       const scoringPlayer = state.players.find(
         (player) => player.id === state.lastGoal?.scoringPlayerId,
       );
-      this.phaseText.setText(`GOL\n${scoringPlayer?.name ?? ''}`);
+      const isOwnGoal = state.lastGoal?.lastTouchPlayerId
+        && state.lastGoal.lastTouchPlayerId === state.lastGoal.concedingPlayerId;
+      const goalLabel = scoringPlayer
+        ? `GOL\n${getPlayerDisplayName(scoringPlayer)}`
+        : isOwnGoal
+          ? 'AUTOGOL\nSIN PUNTO'
+          : 'GOL\nSIN PUNTO';
+      this.phaseText.setText(goalLabel);
       this.phaseText.setVisible(true);
 
-      if (state.lastGoal?.sequence !== this.lastGoalSequence) {
-        this.lastGoalSequence = state.lastGoal?.sequence;
+      const goalSequence = state.lastGoal?.goalEventId ?? state.lastGoal?.sequence;
+
+      if (goalSequence !== this.lastGoalSequence) {
+        this.lastGoalSequence = goalSequence;
         this.cameras.main.flash(140, 255, 255, 255, false);
       }
       return;
@@ -283,7 +302,7 @@ export class MultiplayerBoardScene extends Phaser.Scene {
       bottom: { x: width / 2, y: height - 38, originX: 0.5, originY: 0.5 },
     };
 
-    for (const player of this.room.players) {
+    for (const player of this.latestState?.players ?? this.room.players) {
       const text = this.scoreTexts.get(player.id);
       const position = scorePositions[player.side];
       text?.setPosition(position.x, position.y).setOrigin(position.originX, position.originY);
@@ -300,9 +319,50 @@ export class MultiplayerBoardScene extends Phaser.Scene {
     view.core.setPosition(x, y);
   }
 
-  showNetworkMessage(message) {
+  handleDisconnect() {
+    if (this.hasEnded) {
+      return;
+    }
+
+    this.connectionLost = true;
+    this.showNetworkMessage('Conexion perdida. Reconectando...', { persistent: true });
+  }
+
+  handleConnect() {
+    if (this.connectionLost && !this.hasEnded) {
+      this.showNetworkMessage('Conexion restablecida. Recuperando partida...', {
+        persistent: true,
+      });
+    }
+  }
+
+  handleConnectionReady(payload) {
+    if (!this.connectionLost || this.hasEnded) {
+      return;
+    }
+
+    if (payload?.resumed && payload.playerId === this.localPlayer.id) {
+      this.connectionLost = false;
+      this.showNetworkMessage('Partida recuperada.');
+      return;
+    }
+
+    this.receiveMatchEnd({
+      reason: 'connection-lost',
+      state: this.latestState,
+    });
+  }
+
+  showNetworkMessage(message, { persistent = false } = {}) {
+    this.networkMessageTimer?.remove(false);
     this.networkText.setText(message).setVisible(true);
-    this.time.delayedCall(1800, () => this.networkText?.setVisible(false));
+
+    if (!persistent) {
+      this.networkMessageTimer = this.time.delayedCall(
+        1800,
+        () => this.networkText?.setVisible(false),
+      );
+    }
   }
 
   showEndScreen(reason) {
@@ -387,5 +447,6 @@ export class MultiplayerBoardScene extends Phaser.Scene {
     }
 
     this.unsubscribers = [];
+    this.networkMessageTimer?.remove(false);
   }
 }
